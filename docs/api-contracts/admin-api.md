@@ -18,8 +18,14 @@ the public bootstrap endpoint never reopens.
 ## Administration
 
 - `GET admin/snapshot`
-- `POST admin/books` (`multipart/form-data`: JSON `metadata`, optional `cover`,
-  optional `pdf`)
+- `POST admin/books` (`multipart/form-data`: nullable `id`, `title`, `author`,
+  `description`, `categoryId`, `publicationYear`, `pageCount`, and `status`
+  fields, plus optional `cover` and `pdf`). For compatibility with older admin
+  builds, the former JSON `metadata` form field is still accepted but is no
+  longer advertised by OpenAPI.
+- `GET admin/books/{id}/protected-file` — downloads the current encrypted `.brc`
+  container as an attachment. It requires an admin session, uses private
+  no-store caching, and never decrypts the original PDF or returns key material.
 - `POST admin/books/{id}/archive`
 - `POST admin/categories`
 - `PUT admin/categories/{id}`
@@ -37,4 +43,3 @@ authorization.
 
 No protected object path, wrapped DEK, plaintext checksum, or book license is
 returned through the catalog.
-

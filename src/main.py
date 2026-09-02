@@ -4,7 +4,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Response, UploadFile, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    File,
+    Form,
+    HTTPException,
+    Request,
+    Response,
+    UploadFile,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from sqlalchemy import func, select, text
@@ -31,7 +41,7 @@ from .security import (
     set_session_cookie,
     verify_password,
 )
-from .storage import cover_file, encrypt_pdf, store_cover
+from .storage import cover_file, encrypt_pdf, protected_book_file, store_cover
 
 app = FastAPI(title="Protected Book API", version="0.1.0")
 app.add_middleware(
@@ -80,6 +90,12 @@ def _book_json(book: Book) -> dict:
         "version": version.version_number if version else 1,
         "createdAt": book.created_at.isoformat(),
     }
+
+
+async def _legacy_book_metadata(request: Request) -> str | None:
+    """Read the former JSON form field without advertising it in OpenAPI."""
+    value = (await request.form()).get("metadata")
+    return value if isinstance(value, str) else None
 
 
 @app.get("/health")
@@ -202,18 +218,48 @@ def admin_snapshot(_: AdminUser, db: DbSession) -> dict:
 def save_book(
     actor: AdminUser,
     db: DbSession,
-    metadata: Annotated[str, Form()],
+    legacy_metadata: Annotated[str | None, Depends(_legacy_book_metadata)],
+    id: Annotated[str | None, Form()] = None,
+    title: Annotated[str | None, Form()] = None,
+    author: Annotated[str | None, Form()] = None,
+    description: Annotated[str | None, Form()] = None,
+    category_id: Annotated[str | None, Form(alias="categoryId")] = None,
+    publication_year: Annotated[int | None, Form(alias="publicationYear")] = None,
+    page_count: Annotated[int | None, Form(alias="pageCount")] = None,
+    book_status: Annotated[str | None, Form(alias="status")] = None,
     cover: Annotated[UploadFile | None, File()] = None,
     pdf: Annotated[UploadFile | None, File()] = None,
 ) -> dict:
-    try:
-        payload = BookInput.model_validate(json.loads(metadata))
-    except (json.JSONDecodeError, ValueError) as error:
-        raise HTTPException(422, "Invalid book metadata") from error
-    book_id = _uuid(payload.id, "book id")
+    if legacy_metadata is not None:
+        try:
+            payload = BookInput.model_validate(json.loads(legacy_metadata))
+        except (json.JSONDecodeError, ValueError) as error:
+            raise HTTPException(422, "Invalid book metadata") from error
+        book_id = _uuid(payload.id, "book id")
+    else:
+        book_id = _uuid(id, "book id")
+
     book = db.get(Book, book_id) if book_id else None
     if book_id and not book:
         raise HTTPException(404, "Book not found")
+
+    if legacy_metadata is None:
+        try:
+            payload = BookInput(
+                id=id,
+                title=title if title is not None else (book.title if book else "Untitled"),
+                author=author,
+                description=description,
+                categoryId=category_id,
+                publicationYear=publication_year,
+                pageCount=page_count,
+                status=(
+                    book_status if book_status is not None else (book.status if book else "draft")
+                ),
+            )
+        except ValueError as error:
+            raise HTTPException(422, "Invalid book metadata") from error
+
     if not book:
         book = Book(title=payload.title)
         db.add(book)
@@ -280,6 +326,42 @@ def archive_book(book_id: uuid.UUID, actor: AdminUser, db: DbSession) -> None:
     book.status = "archived"
     _audit(db, actor, "archive_book", "book", book.id)
     db.commit()
+
+
+@app.get(
+    "/api/v1/admin/books/{book_id}/protected-file",
+    response_class=FileResponse,
+    responses={
+        200: {
+            "content": {"application/octet-stream": {}},
+            "description": "The encrypted BRC book container",
+        }
+    },
+)
+def download_protected_book(book_id: uuid.UUID, actor: AdminUser, db: DbSession) -> FileResponse:
+    book = db.scalar(
+        select(Book).where(Book.id == book_id).options(joinedload(Book.current_version))
+    )
+    if not book:
+        raise HTTPException(404, "Book not found")
+    if not book.current_version:
+        raise HTTPException(404, "Book has no protected file")
+
+    version = book.current_version
+    path = protected_book_file(version.storage_path)
+    _audit(db, actor, "download_protected_book", "book_version", version.id)
+    db.commit()
+
+    filename = f"{Path(version.original_filename).stem}.brc"
+    return FileResponse(
+        path,
+        media_type="application/octet-stream",
+        filename=filename,
+        headers={
+            "Cache-Control": "private, no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
+    )
 
 
 @app.put("/api/v1/admin/categories/{category_id}")

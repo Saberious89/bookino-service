@@ -12,7 +12,8 @@ the service and PostgreSQL is reachable only by the service network.
 - immutable PDF versions
 - chunked AES-256-GCM protected-book containers
 - a random DEK for every version, wrapped by a server-only KEK
-- no public protected-file route
+- no public protected-file route; admins can download only the encrypted `.brc`
+  container through an authenticated, audited endpoint
 - archive semantics instead of destructive book deletion
 - device revocation and audit logging
 - bounded PDF/cover upload sizes and file-signature checks
@@ -35,4 +36,3 @@ email/Google authentication, and reader progress/favorites/bookmarks APIs need
 to be implemented and security-reviewed together with the Android client. The
 database tables are present, but this backend does not claim those unfinished
 flows are production-ready.
-

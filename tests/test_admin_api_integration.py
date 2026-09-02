@@ -37,12 +37,25 @@ def test_admin_bootstrap_publish_replace_and_archive():
         }
         created = client.post(
             "/api/v1/admin/books",
-            data={"metadata": json.dumps(metadata)},
+            data={key: value for key, value in metadata.items() if value is not None},
             files={"pdf": ("test.pdf", b"%PDF-1.7\nprotected test payload", "application/pdf")},
         )
         assert created.status_code == 200, created.text
         book = created.json()
         assert book["version"] == 1
+
+        protected_download = client.get(
+            f"/api/v1/admin/books/{book['id']}/protected-file"
+        )
+        assert protected_download.status_code == 200, protected_download.text
+        assert protected_download.headers["content-type"] == "application/octet-stream"
+        assert protected_download.headers["cache-control"] == "private, no-store"
+        assert 'filename="test.brc"' in protected_download.headers["content-disposition"]
+        assert protected_download.content.startswith(b"BRC1")
+        assert b"protected test payload" not in protected_download.content
+        assert (
+            anonymous.get(f"/api/v1/admin/books/{book['id']}/protected-file").status_code == 401
+        )
 
         catalog = anonymous.get("/api/v1/catalog")
         assert catalog.status_code == 200

@@ -56,3 +56,7 @@ See [admin-api.md](docs/api-contracts/admin-api.md) and
 
 For a step-by-step production setup, verification, backup, update, and
 troubleshooting procedure, see [deployment.md](docs/deployment.md).
+
+For a Runflare-specific deployment using the existing Dockerfile, managed
+PostgreSQL, and persistent book storage, see
+[runflare-deployment.md](docs/runflare-deployment.md).

@@ -123,3 +123,11 @@ def cover_file(path: str) -> Path:
     if cover_root not in candidate.parents or not candidate.is_file():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Cover not found")
     return candidate
+
+
+def protected_book_file(path: str) -> Path:
+    candidate = (settings.storage_root / path).resolve()
+    protected_root = (settings.storage_root / "protected-books").resolve()
+    if protected_root not in candidate.parents or not candidate.is_file():
+        raise HTTPException(status.HTTP_404_NOT_FOUND, "Protected book file not found")
+    return candidate

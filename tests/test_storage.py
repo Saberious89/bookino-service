@@ -6,10 +6,10 @@ import uuid
 import pytest
 from cryptography.exceptions import InvalidTag
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from fastapi import UploadFile
+from fastapi import HTTPException, UploadFile
 
 from src.config import settings
-from src.storage import MAGIC, encrypt_pdf
+from src.storage import MAGIC, encrypt_pdf, protected_book_file
 
 
 def _decrypt_first_chunk(path, version_id, wrapped_dek):
@@ -58,5 +58,25 @@ def test_modified_ciphertext_is_rejected(tmp_path):
         target.write_bytes(data)
         with pytest.raises(InvalidTag):
             _decrypt_first_chunk(target, version_id, result.wrapped_dek)
+    finally:
+        object.__setattr__(settings, "storage_root", original_root)
+
+
+def test_protected_book_file_only_returns_files_inside_protected_root(tmp_path):
+    original_root = settings.storage_root
+    object.__setattr__(settings, "storage_root", tmp_path)
+    protected = tmp_path / "protected-books" / "version.brc"
+    protected.parent.mkdir()
+    protected.write_bytes(b"BRC1")
+    outside = tmp_path / "outside.brc"
+    outside.write_bytes(b"not protected")
+    try:
+        assert protected_book_file("protected-books/version.brc") == protected
+        with pytest.raises(HTTPException) as traversal:
+            protected_book_file("protected-books/../outside.brc")
+        assert traversal.value.status_code == 404
+        with pytest.raises(HTTPException) as missing:
+            protected_book_file("protected-books/missing.brc")
+        assert missing.value.status_code == 404
     finally:
         object.__setattr__(settings, "storage_root", original_root)
