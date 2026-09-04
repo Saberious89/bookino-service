@@ -17,7 +17,7 @@ from fastapi import (
 )
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
-from sqlalchemy import func, select, text
+from sqlalchemy import func, select, text, update
 from sqlalchemy.orm import joinedload
 
 from .config import settings
@@ -31,6 +31,7 @@ from .models import (
     User,
     utcnow,
 )
+from .reader_api import router as reader_router
 from .schemas import BookInput, CategoryInput, Credentials
 from .security import (
     AdminUser,
@@ -51,6 +52,7 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["Content-Type", "X-Requested-With"],
 )
+app.include_router(reader_router)
 
 
 def _uuid(value: str | None, field: str) -> uuid.UUID | None:
@@ -81,6 +83,7 @@ def _book_json(book: Book) -> dict:
         "author": book.author,
         "description": book.description,
         "categoryId": str(book.category_id) if book.category_id else None,
+        "categoryName": book.category.name if book.category else None,
         "publicationYear": book.publication_year,
         "pageCount": book.page_count,
         "coverUrl": f"/api/v1/media/{book.cover_path}" if book.cover_path else None,
@@ -88,6 +91,9 @@ def _book_json(book: Book) -> dict:
         "pdfBytes": version.plain_file_size if version else None,
         "status": book.status,
         "version": version.version_number if version else 1,
+        "versionId": str(version.id) if version else None,
+        "encryptedSha256": version.encrypted_sha256 if version else None,
+        "encryptedBytes": version.encrypted_file_size if version else None,
         "createdAt": book.created_at.isoformat(),
     }
 
@@ -128,8 +134,6 @@ def bootstrap_admin(credentials: Credentials, response: Response, db: DbSession)
         role="admin",
     )
     db.add(user)
-    for order, name in enumerate(("داستان", "هنر و طراحی", "تاریخ", "علمی")):
-        db.add(Category(name=name, sort_order=order))
     db.commit()
     db.refresh(user)
     set_session_cookie(response, user)
@@ -167,16 +171,28 @@ def public_catalog(db: DbSession) -> list[dict]:
     books = db.scalars(
         select(Book)
         .where(Book.status == "published")
-        .options(joinedload(Book.current_version))
+        .options(joinedload(Book.current_version), joinedload(Book.category))
         .order_by(Book.created_at.desc())
     ).all()
     return [_book_json(book) for book in books if book.current_version]
 
 
+@app.get("/api/v1/categories")
+def public_categories(db: DbSession) -> list[dict]:
+    categories = db.scalars(
+        select(Category)
+        .where(Category.is_active.is_(True))
+        .order_by(Category.sort_order, Category.name)
+    ).all()
+    return [{"id": str(item.id), "name": item.name} for item in categories]
+
+
 @app.get("/api/v1/admin/snapshot")
 def admin_snapshot(_: AdminUser, db: DbSession) -> dict:
     books = db.scalars(
-        select(Book).options(joinedload(Book.current_version)).order_by(Book.created_at.desc())
+        select(Book)
+        .options(joinedload(Book.current_version), joinedload(Book.category))
+        .order_by(Book.created_at.desc())
     ).all()
     categories = db.scalars(select(Category).order_by(Category.sort_order, Category.name)).all()
     users = db.scalars(
@@ -313,7 +329,9 @@ def save_book(
     db.commit()
     db.refresh(book)
     book = db.scalar(
-        select(Book).where(Book.id == book.id).options(joinedload(Book.current_version))
+        select(Book)
+        .where(Book.id == book.id)
+        .options(joinedload(Book.current_version), joinedload(Book.category))
     )
     return _book_json(book)
 
@@ -387,6 +405,17 @@ def create_category(payload: CategoryInput, actor: AdminUser, db: DbSession) -> 
     _audit(db, actor, "create_category", "category", category.id)
     db.commit()
     return {"id": str(category.id), "name": category.name, "isActive": category.is_active}
+
+
+@app.delete("/api/v1/admin/categories/{category_id}", status_code=204)
+def delete_category(category_id: uuid.UUID, actor: AdminUser, db: DbSession) -> None:
+    category = db.get(Category, category_id)
+    if not category:
+        raise HTTPException(404, "Category not found")
+    db.execute(update(Book).where(Book.category_id == category.id).values(category_id=None))
+    _audit(db, actor, "delete_category", "category", category.id)
+    db.delete(category)
+    db.commit()
 
 
 @app.post("/api/v1/admin/devices/{device_id}/revoke", status_code=204)

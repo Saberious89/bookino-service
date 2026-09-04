@@ -24,13 +24,20 @@ def test_admin_bootstrap_publish_replace_and_archive():
 
         snapshot = client.get("/api/v1/admin/snapshot")
         assert snapshot.status_code == 200
-        assert len(snapshot.json()["categories"]) == 4
+        assert snapshot.json()["categories"] == []
+
+        created_category = client.post(
+            "/api/v1/admin/categories",
+            json={"name": "دسته آزمایشی", "isActive": True},
+        )
+        assert created_category.status_code == 201, created_category.text
+        category_id = created_category.json()["id"]
 
         metadata = {
             "title": "کتاب آزمایشی",
             "author": None,
             "description": None,
-            "categoryId": None,
+            "categoryId": category_id,
             "publicationYear": 2026,
             "pageCount": 1,
             "status": "published",
@@ -71,6 +78,13 @@ def test_admin_bootstrap_publish_replace_and_archive():
         )
         assert replaced.status_code == 200, replaced.text
         assert replaced.json()["version"] == 2
+
+        deleted_category = client.delete(f"/api/v1/admin/categories/{category_id}")
+        assert deleted_category.status_code == 204
+        refreshed = client.get("/api/v1/admin/snapshot")
+        assert refreshed.status_code == 200
+        assert refreshed.json()["categories"] == []
+        assert refreshed.json()["books"][0]["categoryId"] is None
 
         archived = client.post(f"/api/v1/admin/books/{book['id']}/archive")
         assert archived.status_code == 204

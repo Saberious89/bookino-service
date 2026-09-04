@@ -29,6 +29,8 @@ the public bootstrap endpoint never reopens.
 - `POST admin/books/{id}/archive`
 - `POST admin/categories`
 - `PUT admin/categories/{id}`
+- `DELETE admin/categories/{id}` — removes the category and leaves its books
+  uncategorized
 - `POST admin/devices/{id}/revoke`
 - `GET admin/analytics`
 

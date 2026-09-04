@@ -131,3 +131,17 @@ def protected_book_file(path: str) -> Path:
     if protected_root not in candidate.parents or not candidate.is_file():
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Protected book file not found")
     return candidate
+
+
+def unwrap_dek(wrapped_dek: str, version_id: uuid.UUID) -> bytes:
+    try:
+        payload = base64.b64decode(wrapped_dek, validate=True)
+        if len(payload) < 29:
+            raise ValueError("Wrapped key is too short")
+        return AESGCM(settings.book_kek).decrypt(
+            payload[:12], payload[12:], str(version_id).encode()
+        )
+    except (ValueError, TypeError) as error:
+        raise HTTPException(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "Book key cannot be unlocked"
+        ) from error

@@ -16,6 +16,10 @@ class Settings:
     cookie_secure: bool = os.getenv("COOKIE_SECURE", "false").lower() == "true"
     max_pdf_bytes: int = int(os.getenv("MAX_PDF_BYTES", str(200 * 1024 * 1024)))
     max_cover_bytes: int = int(os.getenv("MAX_COVER_BYTES", str(2 * 1024 * 1024)))
+    access_token_minutes: int = int(os.getenv("ACCESS_TOKEN_MINUTES", "15"))
+    refresh_token_days: int = int(os.getenv("REFRESH_TOKEN_DAYS", "30"))
+    offline_license_days: int = int(os.getenv("OFFLINE_LICENSE_DAYS", "7"))
+    google_client_ids_raw: str = os.getenv("GOOGLE_CLIENT_IDS", "")
 
     def __post_init__(self) -> None:
         if self.environment == "production" and (
@@ -39,6 +43,10 @@ class Settings:
         if len(value) != 32:
             raise RuntimeError("BOOK_KEK_BASE64 must decode to exactly 32 bytes")
         return value
+
+    @cached_property
+    def google_client_ids(self) -> list[str]:
+        return [value.strip() for value in self.google_client_ids_raw.split(",") if value.strip()]
 
 
 settings = Settings()
