@@ -1,5 +1,8 @@
+import base64
 from collections.abc import Generator
 
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.asymmetric import padding
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from fastapi.testclient import TestClient
@@ -8,6 +11,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.db import Base, get_db
 from src.main import app
+from src.reader_security import protect_dek_for_device
 
 
 def _public_key() -> str:
@@ -16,6 +20,26 @@ def _public_key() -> str:
         serialization.Encoding.PEM,
         serialization.PublicFormat.SubjectPublicKeyInfo,
     ).decode()
+
+
+def test_protect_dek_uses_required_rsa_oaep_parameters() -> None:
+    private_key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public_key = private_key.public_key().public_bytes(
+        serialization.Encoding.PEM,
+        serialization.PublicFormat.SubjectPublicKeyInfo,
+    ).decode()
+    dek = b"0123456789abcdef0123456789abcdef"
+
+    protected_dek = protect_dek_for_device(dek, public_key)
+
+    assert private_key.decrypt(
+        base64.b64decode(protected_dek),
+        padding.OAEP(
+            mgf=padding.MGF1(algorithm=hashes.SHA1()),
+            algorithm=hashes.SHA256(),
+            label=None,
+        ),
+    ) == dek
 
 
 def test_reader_register_login_and_device_limit(tmp_path) -> None:

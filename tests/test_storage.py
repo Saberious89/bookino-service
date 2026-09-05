@@ -9,7 +9,7 @@ from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 from fastapi import HTTPException, UploadFile
 
 from src.config import settings
-from src.storage import MAGIC, encrypt_pdf, protected_book_file
+from src.storage import MAGIC, encrypt_pdf, protected_book_file, unwrap_dek
 
 
 def _decrypt_first_chunk(path, version_id, wrapped_dek):
@@ -60,6 +60,33 @@ def test_modified_ciphertext_is_rejected(tmp_path):
             _decrypt_first_chunk(target, version_id, result.wrapped_dek)
     finally:
         object.__setattr__(settings, "storage_root", original_root)
+
+
+def test_every_chunk_is_bound_to_its_version_and_index(tmp_path, monkeypatch):
+    from dataclasses import replace
+
+    from src import storage
+
+    monkeypatch.setattr(storage, "settings", replace(settings, storage_root=tmp_path))
+    monkeypatch.setattr(storage, "CHUNK_SIZE", 16)
+    version_id = uuid.uuid4()
+    content = b"%PDF-1.7\n" + b"protected content" * 8
+    result = encrypt_pdf(UploadFile(filename="book.pdf", file=io.BytesIO(content)), version_id)
+    cipher = AESGCM(unwrap_dek(result.wrapped_dek, version_id))
+    recovered = bytearray()
+    with (tmp_path / result.storage_path).open("rb") as source:
+        assert source.read(4) == MAGIC
+        header = json.loads(source.read(struct.unpack(">I", source.read(4))[0]))
+        for index in range(header["chunk_count"]):
+            length = struct.unpack(">I", source.read(4))[0]
+            nonce = source.read(12)
+            encrypted = source.read(length)
+            recovered.extend(cipher.decrypt(nonce, encrypted, f"{version_id}:{index}".encode()))
+            for wrong_aad in [None, f"{version_id}:{index + 1}".encode(), b"another-version:0"]:
+                with pytest.raises(InvalidTag):
+                    cipher.decrypt(nonce, encrypted, wrong_aad)
+        assert source.read() == b""
+    assert recovered == content
 
 
 def test_protected_book_file_only_returns_files_inside_protected_root(tmp_path):

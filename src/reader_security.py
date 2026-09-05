@@ -137,7 +137,7 @@ def protect_dek_for_device(dek: bytes, public_key_pem: str) -> str:
         encrypted = key.encrypt(
             dek,
             padding.OAEP(
-                mgf=padding.MGF1(algorithm=hashes.SHA256()),
+                mgf=padding.MGF1(algorithm=hashes.SHA1()),
                 algorithm=hashes.SHA256(),
                 label=None,
             ),
