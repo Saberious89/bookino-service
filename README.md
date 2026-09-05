@@ -57,6 +57,10 @@ See [admin-api.md](docs/api-contracts/admin-api.md) and
 For a step-by-step production setup, verification, backup, update, and
 troubleshooting procedure, see [deployment.md](docs/deployment.md).
 
+Beginner-friendly deployment guides for the backend, PostgreSQL, HTTPS, and
+backups are available in [English](docs/deployment-en.md) and
+[Persian](docs/deployment-fa.md).
+
 For a Runflare-specific deployment using the existing Dockerfile, managed
 PostgreSQL, and persistent book storage, see
 [runflare-deployment.md](docs/runflare-deployment.md).
